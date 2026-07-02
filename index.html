@@ -276,9 +276,11 @@
   <div class="panel no-print">
     <h2><span class="step-num">4</span>Проверка</h2>
     <div class="runbar">
-      <button class="primary" id="runBtn" disabled>Запустить проверку</button>
+      <button class="primary" id="localCheckBtn" disabled>Проверить арифметику бесплатно (без ИИ)</button>
+      <button class="secondary" id="runBtn" disabled>Проверить с помощью ИИ (нужен API-ключ)</button>
       <div class="stage" id="stage" style="display:none;"><div class="spinner"></div><span id="stageText"></span></div>
     </div>
+    <div class="hint">Бесплатная проверка сверяет итоги и промежуточные суммы в загруженных таблицах (.xlsx/.xls/.csv) — без обращения к Claude. Классификацию по МСФО, учётную политику и увязки между примечаниями проверяет только режим с ИИ.</div>
     <div id="errorBox"></div>
   </div>
 
@@ -590,9 +592,151 @@ function updateRunButton() {
   const hasText = gatherText().length > 0;
   const anyProcessing = uploadedFiles.some(f => f.status === "processing");
   $("runBtn").disabled = !(hasKey && hasText) || anyProcessing;
+  $("localCheckBtn").disabled = !hasText || anyProcessing;
 }
 
-// ---------- Run review ----------
+// ---------- Local arithmetic check (no AI, no API key) ----------
+const TOTAL_LABEL_RE = /итог|всего|баланс\b|total|sum\b/i;
+const ASSETS_LABEL_RE = /итого\s*активы|всего\s*активы|баланс\s*актив|total\s*assets/i;
+const LIAB_EQUITY_LABEL_RE = /итого\s*обязательств.*капитал|обязательства\s*и\s*капитал.*итого|итого\s*капитал.*обязательств|total\s*liabilities\s*and\s*equity/i;
+
+function parseLocalNumber(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number") return v;
+  let s = String(v).trim();
+  if (!s || !/\d/.test(s)) return null;
+  let neg = false;
+  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+  s = s.replace(/\s/g, "").replace(/[^\d,.\-]/g, "");
+  if (s.includes(",") && s.includes(".")) {
+    if (s.lastIndexOf(",") > s.lastIndexOf(".")) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(/,/g, "");
+  } else if (s.includes(",")) {
+    s = /,\d{1,2}$/.test(s) ? s.replace(",", ".") : s.replace(/,/g, "");
+  }
+  const num = parseFloat(s);
+  return Number.isFinite(num) ? (neg ? -num : num) : null;
+}
+
+function lastNumericCell(row) {
+  for (let c = row.length - 1; c >= 1; c--) {
+    const val = parseLocalNumber(row[c]);
+    if (val !== null) return val;
+  }
+  return null;
+}
+
+function checkSheetFooting(sheetName, aoa) {
+  const findings = [];
+  const maxCols = aoa.reduce((m, r) => Math.max(m, r.length), 0);
+  let colSums = new Array(maxCols).fill(0);
+  let colHas = new Array(maxCols).fill(false);
+  for (const row of aoa) {
+    const label = String(row[0] || "");
+    if (TOTAL_LABEL_RE.test(label)) {
+      for (let c = 1; c < row.length; c++) {
+        if (!colHas[c]) continue;
+        const val = parseLocalNumber(row[c]);
+        if (val === null) continue;
+        const expected = colSums[c];
+        const diff = Math.abs(val - expected);
+        const tolerance = Math.max(1, Math.abs(expected) * 0.001);
+        if (diff > tolerance) {
+          findings.push({
+            section: "Баланс", severity: diff > tolerance * 5 ? "critical" : "warning",
+            item: `${sheetName} — «${label.trim()}» (столбец ${c + 1})`,
+            description: `Сумма строк выше по столбцу — ${expected.toLocaleString("ru-RU")}, в строке итога указано ${val.toLocaleString("ru-RU")}. Расхождение: ${diff.toLocaleString("ru-RU")}.`
+          });
+        } else {
+          findings.push({
+            section: "Баланс", severity: "info",
+            item: `${sheetName} — «${label.trim()}» (столбец ${c + 1})`,
+            description: `Промежуточный итог сходится: ${val.toLocaleString("ru-RU")}.`
+          });
+        }
+      }
+      colSums = new Array(maxCols).fill(0);
+      colHas = new Array(maxCols).fill(false);
+    } else {
+      for (let c = 1; c < row.length; c++) {
+        const val = parseLocalNumber(row[c]);
+        if (val !== null) { colSums[c] += val; colHas[c] = true; }
+      }
+    }
+  }
+  return findings;
+}
+
+function checkBalanceEquation(sheetEntries) {
+  let assetsRow = null, liabRow = null;
+  for (const { name, aoa } of sheetEntries) {
+    for (const row of aoa) {
+      const label = String(row[0] || "");
+      if (!assetsRow && ASSETS_LABEL_RE.test(label)) assetsRow = { sheet: name, label, val: lastNumericCell(row) };
+      if (!liabRow && LIAB_EQUITY_LABEL_RE.test(label)) liabRow = { sheet: name, label, val: lastNumericCell(row) };
+    }
+  }
+  if (!assetsRow || !liabRow || assetsRow.val === null || liabRow.val === null) return [];
+  const diff = Math.abs(assetsRow.val - liabRow.val);
+  const tolerance = Math.max(1, Math.abs(assetsRow.val) * 0.001);
+  if (diff > tolerance) {
+    return [{
+      section: "Баланс", severity: "critical",
+      item: "Равенство Активы = Обязательства + Капитал",
+      description: `«${assetsRow.label.trim()}» = ${assetsRow.val.toLocaleString("ru-RU")}, «${liabRow.label.trim()}» = ${liabRow.val.toLocaleString("ru-RU")}. Расхождение: ${diff.toLocaleString("ru-RU")}.`
+    }];
+  }
+  return [{
+    section: "Баланс", severity: "info",
+    item: "Равенство Активы = Обязательства + Капитал",
+    description: `Баланс сходится: ${assetsRow.val.toLocaleString("ru-RU")} = ${liabRow.val.toLocaleString("ru-RU")}.`
+  }];
+}
+
+$("localCheckBtn").addEventListener("click", runLocalCheck);
+
+function runLocalCheck() {
+  $("errorBox").innerHTML = "";
+  $("results").style.display = "none";
+  const sheetFiles = uploadedFiles.filter(f => f.status === "done" && f.type === "sheet");
+  if (!sheetFiles.length) {
+    $("errorBox").innerHTML = `<div class="error-box">Бесплатная проверка работает только с табличными файлами (.xlsx/.xls/.csv). Загрузите таблицу с балансом или ОПУ, либо используйте проверку с ИИ для текста/PDF/DOCX.</div>`;
+    return;
+  }
+  let findings = [];
+  const sheetEntries = [];
+  for (const f of sheetFiles) {
+    for (const s of f.sheets) {
+      sheetEntries.push({ name: `${f.name} / ${s.name}`, aoa: s.aoa });
+      findings.push(...checkSheetFooting(`${f.name} / ${s.name}`, s.aoa));
+    }
+  }
+  findings.push(...checkBalanceEquation(sheetEntries));
+
+  const sevOrder = { critical: 0, warning: 1, info: 2 };
+  findings.sort((a, b) => sevOrder[a.severity] - sevOrder[b.severity]);
+  const critical = findings.filter(f => f.severity === "critical");
+  const warning = findings.filter(f => f.severity === "warning");
+  const info = findings.filter(f => f.severity === "info");
+  const trimmed = [...critical, ...warning, ...info].slice(0, 14);
+  const shownCounts = trimmed.reduce((acc, f) => { acc[f.severity]++; return acc; }, { critical: 0, warning: 0, info: 0 });
+
+  const conclusion = critical.length
+    ? `Найдено расхождений: критично — ${critical.length}, внимание — ${warning.length}. Проверьте указанные суммы.`
+    : warning.length
+    ? `Критичных расхождений не найдено, но есть ${warning.length} моментов, требующих внимания.`
+    : findings.length
+    ? "Арифметические итоги и промежуточные суммы в загруженных таблицах сходятся."
+    : "Не удалось найти строки с итогами («Итого», «Всего», «Total») для сверки — проверьте структуру таблицы вручную.";
+
+  renderResults({
+    summary: shownCounts,
+    conclusion,
+    findings: trimmed
+  });
+}
+
+// ---------- Run review (AI, requires Anthropic API key) ----------
 const SYSTEM_PROMPT = `Ты — опытный МСФО-специалист по контролю качества отчётности, выполняющий предварительную проверку пакета финансовой отчётности перед сдачей. Тебе передан извлечённый текст отчётности (возможно из нескольких файлов: баланс, отчёт о прибылях и убытках, примечания и т.д.).
 
 Проверь данные строго по следующим разделам:

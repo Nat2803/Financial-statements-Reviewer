@@ -244,10 +244,10 @@
   </div>
 
   <div class="panel no-print">
-    <h2><span class="step-num">1</span>Ключ доступа к Anthropic API</h2>
-    <label for="apiKey">API-ключ (sk-ant-...)</label>
-    <input type="password" id="apiKey" placeholder="sk-ant-...">
-    <div class="hint">Ключ хранится только в вашем браузере (localStorage) и используется для прямых запросов к Claude.</div>
+    <h2><span class="step-num">1</span>Код доступа</h2>
+    <label for="accessCode">Код доступа к проверке</label>
+    <input type="password" id="accessCode" placeholder="Выдаётся администратором">
+    <div class="hint">Код хранится только в вашем браузере (localStorage). Анализ выполняется через общий сервис — свой API-ключ вводить не нужно.</div>
   </div>
 
   <div class="panel no-print">
@@ -329,10 +329,10 @@ $("toggleManual").addEventListener("click", () => {
 });
 $("manualText").addEventListener("input", updateTextLen);
 
-const apiKeyInput = $("apiKey");
-apiKeyInput.value = localStorage.getItem("fsr_api_key") || "";
-apiKeyInput.addEventListener("change", () => {
-  localStorage.setItem("fsr_api_key", apiKeyInput.value.trim());
+const accessCodeInput = $("accessCode");
+accessCodeInput.value = localStorage.getItem("fsr_access_code") || "";
+accessCodeInput.addEventListener("change", () => {
+  localStorage.setItem("fsr_access_code", accessCodeInput.value.trim());
   updateRunButton();
 });
 
@@ -586,65 +586,16 @@ function updateTextLen() {
 }
 
 function updateRunButton() {
-  const hasKey = apiKeyInput.value.trim().length > 0;
+  const hasCode = accessCodeInput.value.trim().length > 0;
   const hasText = gatherText().length > 0;
   const anyProcessing = uploadedFiles.some(f => f.status === "processing");
-  $("runBtn").disabled = !(hasKey && hasText) || anyProcessing;
+  $("runBtn").disabled = !(hasCode && hasText) || anyProcessing;
 }
 
 // ---------- Run review ----------
-const SYSTEM_PROMPT = `Ты — опытный МСФО-специалист по контролю качества отчётности, выполняющий предварительную проверку пакета финансовой отчётности перед сдачей. Тебе передан извлечённый текст отчётности (возможно из нескольких файлов: баланс, отчёт о прибылях и убытках, примечания и т.д.).
-
-Проверь данные строго по следующим разделам:
-1. Баланс — арифметика и промежуточные/итоговые суммы (footing); равенство Активы = Обязательства + Капитал; корректность классификации текущих/долгосрочных статей (IAS 1); логичность динамики статьи период к периоду.
-2. ОПУ (отчёт о прибылях и убытках) — арифметика и промежуточные итоги; корректность классификации расходов по функции или характеру (IAS 1); необычные или немотивированные отклонения.
-3. Учётная политика — соответствие фактически применяемых методов (признание выручки, амортизация, оценка запасов, резервы и т.д.) заявленной политике, последовательность применения.
-4. Кросс-чеки раскрытий — совпадение сумм из примечаний со строками баланса и ОПУ; совпадение одних и тех же показателей между разными примечаниями; увязка чистой прибыли с изменением нераспределённой прибыли в капитале; увязка остатка денежных средств (ДДС) с балансом.
-5. Общие замечания — прочие логические противоречия и аномалии, не относящиеся к разделам выше.
-
-Правила:
-- Не придумывай цифры. Если данных для проверки раздела недостаточно — раздел пропускается, не включай по нему замечания.
-- Каждое замечание получает severity: critical (ошибка/расхождение), warning (потенциальное несоответствие) или info (наблюдение, включая подтверждение того, что раздел проверен и сходится).
-- Не более 14 замечаний суммарно. Внутри каждого раздела сортируй по критичности: critical, затем warning, затем info.
-- Стиль — деловой, без разговорных оборотов, конкретные формулировки с цифрами там, где есть расхождение.
-- Если применим конкретный стандарт МСФО (IFRS/IAS), укажи ссылку на него в standard_ref.
-- Передай результат ТОЛЬКО вызовом инструмента submit_review, без сопроводительного текста.`;
-
-const TOOL_DEF = {
-  name: "submit_review",
-  description: "Передать структурированный результат проверки финансовой отчётности",
-  input_schema: {
-    type: "object",
-    properties: {
-      summary: {
-        type: "object",
-        properties: {
-          critical: { type: "integer" },
-          warning: { type: "integer" },
-          info: { type: "integer" }
-        },
-        required: ["critical", "warning", "info"]
-      },
-      conclusion: { type: "string", description: "Общее заключение, 1-2 предложения" },
-      findings: {
-        type: "array",
-        maxItems: 14,
-        items: {
-          type: "object",
-          properties: {
-            section: { type: "string", enum: SECTIONS },
-            severity: { type: "string", enum: ["critical", "warning", "info"] },
-            item: { type: "string", description: "Статья отчётности" },
-            description: { type: "string" },
-            standard_ref: { type: "string" }
-          },
-          required: ["section", "severity", "item", "description"]
-        }
-      }
-    },
-    required: ["summary", "conclusion", "findings"]
-  }
-};
+// Cloudflare Worker proxy: holds the Anthropic API key server-side and checks accessCode.
+// Its SYSTEM_PROMPT / TOOL_DEF (worker/index.js) must stay in sync with this tool's behaviour.
+const WORKER_URL = "https://YOUR-WORKER-SUBDOMAIN.workers.dev";
 
 const STAGE_MESSAGES = [
   "Сверяем итоги баланса…",
@@ -661,7 +612,7 @@ let stageInterval = null;
 $("runBtn").addEventListener("click", runReview);
 
 async function runReview() {
-  const apiKey = apiKeyInput.value.trim();
+  const accessCode = accessCodeInput.value.trim();
   const text = gatherText().slice(0, MAX_TEXT_CHARS);
   $("errorBox").innerHTML = "";
   $("results").style.display = "none";
@@ -675,27 +626,15 @@ async function runReview() {
   }, 2200);
 
   try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    const resp = await fetch(WORKER_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8000,
-        system: SYSTEM_PROMPT,
-        tools: [TOOL_DEF],
-        tool_choice: { type: "tool", name: "submit_review" },
-        messages: [{ role: "user", content: text }]
-      })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, accessCode })
     });
 
     if (!resp.ok) {
       const errData = await resp.json().catch(() => ({}));
-      throw new Error(errData?.error?.message || `Ошибка API (${resp.status})`);
+      throw new Error(errData?.error?.message || errData?.error || `Ошибка сервиса (${resp.status})`);
     }
     const data = await resp.json();
     const toolUse = (data.content || []).find(c => c.type === "tool_use" && c.name === "submit_review");

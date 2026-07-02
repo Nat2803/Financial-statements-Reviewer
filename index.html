@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Проверка финансовой отчётности</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  :root{
+    --bg:#f5f7f3; --panel:#ffffff; --border:#e3e8dd; --text:#161a14; --muted:#68705f;
+    --accent:#8DC63F; --accent2:#5FA82B; --accent-dark:#2F5E15; --accent-soft:#eef7df;
+    --critical:#c0293e; --critical-bg:#fef1f3; --critical-border:#f8ccd4;
+    --warning:#b3670a; --warning-bg:#fff8ec; --warning-border:#fbe3ae;
+    --info:#3c7a1e; --info-bg:#eef7e3; --info-border:#cfe9ac;
+    --shadow-sm:0 1px 2px rgba(20,30,10,.05);
+    --shadow-md:0 10px 26px -14px rgba(30,55,10,.22);
+    --shadow-lg:0 20px 45px -22px rgba(30,55,10,.28);
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  .topbar{position:fixed; top:0; left:0; right:0; height:5px; background:linear-gradient(90deg, var(--accent-dark), var(--accent), var(--accent2)); z-index:50;}
+  body{
+    font-family:"Manrope", "Segoe UI", Arial, sans-serif; background:var(--bg);
+    color:var(--text); margin:0; padding:40px 20px 60px; line-height:1.55;
+  }
+  .wrap{max-width:960px; margin:0 auto;}
+
+  .hero{
+    background:var(--panel); border:1px solid var(--border); border-radius:20px;
+    padding:28px 30px; margin-bottom:22px; box-shadow:var(--shadow-md);
+    border-top:5px solid var(--accent);
+  }
+  .brandrow{display:flex; align-items:center; gap:14px; margin-bottom:4px;}
+  .brandmark{
+    width:46px; height:46px; border-radius:13px; flex:none;
+    background:linear-gradient(145deg, var(--accent), var(--accent2));
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 8px 18px -8px rgba(95,168,43,.6);
+  }
+  .brandmark svg{width:24px; height:24px;}
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:800;
+    letter-spacing:.06em; text-transform:uppercase; background:var(--accent-soft); color:var(--accent-dark);
+    padding:4px 11px; border-radius:99px; margin-bottom:6px;
+  }
+  .hero h1{font-size:24px; margin:2px 0 0; font-weight:800; letter-spacing:-.01em; color:var(--text);}
+  .hero .subtitle{color:var(--muted); font-size:14px; max-width:660px; margin:12px 0 0;}
+  .disclaimer{
+    display:flex; gap:10px; align-items:flex-start; background:var(--accent-soft);
+    border:1px solid #dcefc0; color:#2f4a1c; font-size:12.5px;
+    padding:12px 14px; border-radius:12px; margin-top:18px;
+  }
+  .disclaimer .ico{font-size:15px; line-height:1.2; color:var(--accent-dark);}
+
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:22px 24px; margin-bottom:18px; box-shadow:var(--shadow-sm);
+    transition:box-shadow .2s;
+  }
+  .panel:hover{box-shadow:var(--shadow-md);}
+  .panel h2{
+    font-size:15px; margin:0 0 16px; color:var(--text); font-weight:800;
+    display:flex; align-items:center; gap:10px;
+  }
+  .step-num{
+    display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px;
+    border-radius:8px; background:linear-gradient(145deg, var(--accent), var(--accent2));
+    color:#fff; font-size:12.5px; font-weight:800; flex:none;
+    box-shadow:0 4px 10px -4px rgba(95,168,43,.65);
+  }
+
+  label{font-size:12.5px; font-weight:700; display:block; margin-bottom:7px; color:#3a4232;}
+  input[type=password], input[type=text], textarea, select{
+    width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:10px;
+    font-size:13.5px; font-family:inherit; background:#fbfcfa; color:var(--text);
+    transition:border-color .15s, box-shadow .15s, background .15s;
+  }
+  input[type=password]:focus, input[type=text]:focus, textarea:focus, select:focus{
+    outline:none; border-color:var(--accent); background:#fff;
+    box-shadow:0 0 0 4px var(--accent-soft);
+  }
+  textarea{resize:vertical; min-height:120px;}
+  .hint{font-size:12px; color:var(--muted); margin-top:7px;}
+
+  .dropzone{
+    border:2px dashed #cddbc0; border-radius:14px; padding:34px 20px; text-align:center;
+    color:var(--muted); font-size:13.5px; cursor:pointer; background:#fafcf7;
+    transition:border-color .15s, background .15s, transform .1s;
+  }
+  .dropzone:hover{border-color:var(--accent); background:var(--accent-soft);}
+  .dropzone.drag{border-color:var(--accent); background:var(--accent-soft); transform:scale(1.01);}
+  .dropzone .upicon{font-size:24px; display:block; margin-bottom:8px; color:var(--accent-dark);}
+  .dropzone strong{color:var(--accent-dark);}
+  .dropzone .exts{font-size:11px; color:#9aa392; display:inline-block; margin-top:6px;}
+
+  .filelist{margin-top:14px; display:flex; flex-direction:column; gap:8px;}
+  .fileitem{
+    display:flex; align-items:center; justify-content:space-between; background:#f8faf5;
+    border:1px solid var(--border); border-radius:10px; padding:9px 13px; font-size:13px;
+  }
+  .fileitem .fname{font-weight:700;}
+  .fileitem .fmeta{color:var(--muted); font-size:12px; margin-left:8px;}
+  .fileitem button{
+    background:#fff; border:1px solid #f3c6cd; color:var(--critical); cursor:pointer;
+    font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:7px; transition:background .15s;
+  }
+  .fileitem button:hover{background:var(--critical-bg);}
+
+  .toggle-manual{
+    font-size:12.5px; color:var(--accent-dark); cursor:pointer; margin-top:14px; display:inline-block;
+    font-weight:700;
+  }
+  .toggle-manual:hover{text-decoration:underline;}
+
+  .tabs{display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px;}
+  .tab{
+    padding:6px 13px; border-radius:99px; border:1.5px solid var(--border); background:#f3f5ef;
+    font-size:12px; font-weight:700; cursor:pointer; color:#586150; transition:all .15s;
+  }
+  .tab:hover{border-color:var(--accent); color:var(--accent-dark);}
+  .tab.active{background:linear-gradient(145deg, var(--accent), var(--accent2)); border-color:transparent; color:#fff; box-shadow:0 4px 10px -4px rgba(95,168,43,.55);}
+
+  .preview-table{width:100%; border-collapse:collapse; font-size:12px; max-height:320px; display:block; overflow:auto; border-radius:10px; border:1px solid var(--border);}
+  .preview-table table{border-collapse:collapse; width:100%;}
+  .preview-table td, .preview-table th{border:1px solid var(--border); padding:5px 8px; white-space:nowrap;}
+  .preview-table tr:nth-child(even){background:#fafcf7;}
+  .preview-text{
+    white-space:pre-wrap; font-size:12px; max-height:320px; overflow:auto; background:#f8faf5;
+    border:1px solid var(--border); border-radius:10px; padding:14px;
+    font-family:"Consolas","SF Mono",Menlo,monospace;
+  }
+
+  .progressbar{height:7px; background:#e6ecdd; border-radius:99px; overflow:hidden; margin-top:9px;}
+  .progressbar > div{height:100%; background:linear-gradient(90deg, var(--accent-dark), var(--accent)); width:0%; transition:width .25s;}
+  .progress-label{font-size:12px; color:var(--muted); margin-top:5px;}
+  .textlen{font-size:12px; color:var(--muted); margin-top:8px;}
+  .textlen.over{color:var(--critical); font-weight:700;}
+
+  button.primary{
+    background:linear-gradient(145deg, var(--accent), var(--accent2)); color:#fff; border:none;
+    padding:12px 26px; border-radius:99px; font-size:14px; font-weight:800; cursor:pointer;
+    box-shadow:0 10px 20px -10px rgba(95,168,43,.7); transition:transform .12s, box-shadow .12s, opacity .12s;
+  }
+  button.primary:hover:not(:disabled){transform:translateY(-1px); box-shadow:0 14px 26px -10px rgba(95,168,43,.8);}
+  button.primary:active:not(:disabled){transform:translateY(0);}
+  button.primary:disabled{background:#c7cec0; box-shadow:none; cursor:not-allowed; opacity:.8;}
+
+  button.secondary{
+    background:#fff; color:var(--accent-dark); border:1.5px solid var(--accent-soft); padding:10px 18px;
+    border-radius:99px; font-size:13px; font-weight:800; cursor:pointer; transition:all .15s;
+    box-shadow:var(--shadow-sm);
+  }
+  button.secondary:hover{background:var(--accent-soft); border-color:var(--accent);}
+
+  .runbar{display:flex; align-items:center; gap:16px; flex-wrap:wrap;}
+  .stage{font-size:13px; color:var(--accent-dark); font-weight:700; display:flex; align-items:center; gap:9px;}
+  .spinner{
+    width:15px; height:15px; border:2.5px solid #dfe8d3; border-top-color:var(--accent);
+    border-radius:50%; animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  @keyframes fadein{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+
+  .error-box{
+    background:var(--critical-bg); border:1px solid var(--critical-border); color:var(--critical);
+    padding:12px 16px; border-radius:10px; font-size:13px; margin-top:14px; font-weight:600;
+  }
+
+  #results{display:none; animation:fadein .35s ease;}
+  .summary-row{display:flex; gap:14px; margin-bottom:18px; flex-wrap:wrap;}
+  .summary-card{
+    flex:1; min-width:130px; border-radius:14px; padding:16px 14px; text-align:center;
+    box-shadow:var(--shadow-sm);
+  }
+  .summary-card .num{font-size:30px; font-weight:800; line-height:1.1;}
+  .summary-card .lbl{font-size:12px; margin-top:4px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; opacity:.85;}
+  .summary-card.critical{background:var(--critical-bg); color:var(--critical); border:1px solid var(--critical-border);}
+  .summary-card.warning{background:var(--warning-bg); color:var(--warning); border:1px solid var(--warning-border);}
+  .summary-card.info{background:var(--info-bg); color:var(--info); border:1px solid var(--info-border);}
+
+  .conclusion{
+    font-size:14px; background:var(--accent-soft); border:1px solid #dcefc0;
+    border-left:4px solid var(--accent); border-radius:10px; padding:14px 16px; margin-bottom:20px;
+    font-weight:500; color:#2f3a26;
+  }
+  .section-block{margin-bottom:20px;}
+  .section-block h3{
+    font-size:13.5px; margin:0 0 10px; color:var(--accent-dark); font-weight:800;
+    text-transform:uppercase; letter-spacing:.04em; padding-bottom:8px; border-bottom:2px solid var(--border);
+  }
+  .finding{
+    border-radius:10px; padding:12px 14px; margin-bottom:9px; font-size:13px;
+    border:1px solid; border-left-width:4px; box-shadow:var(--shadow-sm);
+  }
+  .finding.critical{background:var(--critical-bg); border-color:var(--critical-border); border-left-color:var(--critical);}
+  .finding.warning{background:var(--warning-bg); border-color:var(--warning-border); border-left-color:var(--warning);}
+  .finding.info{background:var(--info-bg); border-color:var(--info-border); border-left-color:var(--info);}
+  .finding .fhead{display:flex; justify-content:space-between; align-items:center; gap:10px; font-weight:700; margin-bottom:5px;}
+  .finding .fsev{
+    font-size:9.5px; text-transform:uppercase; letter-spacing:.04em; padding:3px 9px; border-radius:99px;
+    background:rgba(0,0,0,.07); flex:none; font-weight:800;
+  }
+  .finding .fstd{font-size:11px; color:var(--muted); margin-top:6px; font-style:italic;}
+  .export-bar{display:flex; gap:10px; margin-top:18px;}
+
+  @media print{
+    body{background:#fff; padding:0;}
+    .no-print{display:none !important;}
+    .topbar{display:none !important;}
+    .panel{border:none; padding:0; box-shadow:none;}
+    #results{display:block !important;}
+  }
+</style>
+</head>
+<body>
+<div class="topbar no-print"></div>
+<div class="wrap">
+
+  <div class="hero no-print">
+    <div class="brandrow">
+      <div class="brandmark">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 17c3-6 7-11 13-13-1 6-3 10-7 13-2 1.5-4 2-6 2v-2z" fill="#fff"/>
+          <path d="M4 19c2-1 4-1 6-1" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div>
+        <span class="eyebrow">IFRS / IAS · Проверка отчётности</span>
+        <h1>Проверка финансовой отчётности</h1>
+      </div>
+    </div>
+    <p class="subtitle">Предварительная проверка пакета отчётности на арифметику, увязки между формами и отклонения от МСФО — до сдачи, без привлечения аудитора.</p>
+    <div class="disclaimer">
+      <span class="ico">ⓘ</span>
+      <span>Инструмент не заменяет заключение аттестованного аудитора и не является профессиональной аудиторской или бухгалтерской консультацией.
+      Разбор файлов выполняется локально в браузере; во внешний API передаётся только извлечённый текстовый слой отчётности.</span>
+    </div>
+  </div>
+
+  <div class="panel no-print">
+    <h2><span class="step-num">1</span>Ключ доступа к Anthropic API</h2>
+    <label for="apiKey">API-ключ (sk-ant-...)</label>
+    <input type="password" id="apiKey" placeholder="sk-ant-...">
+    <div class="hint">Ключ хранится только в вашем браузере (localStorage) и используется для прямых запросов к Claude.</div>
+  </div>
+
+  <div class="panel no-print">
+    <h2><span class="step-num">2</span>Загрузка пакета отчётности</h2>
+    <div class="dropzone" id="dropzone">
+      <span class="upicon">⬆</span>
+      Перетащите файлы сюда или <strong>выберите файлы</strong>
+      <div class="exts">.xlsx · .xls · .csv · .docx · .pdf</div>
+    </div>
+    <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.csv,.docx,.pdf" style="display:none;">
+    <div class="filelist" id="fileList"></div>
+    <span class="toggle-manual" id="toggleManual">+ Вставить текст вручную вместо файла</span>
+    <div id="manualBlock" style="display:none; margin-top:12px;">
+      <label for="manualText">Текст отчётности</label>
+      <textarea id="manualText" placeholder="Вставьте текст, скопированный из источника"></textarea>
+    </div>
+    <div class="textlen" id="textLen"></div>
+  </div>
+
+  <div class="panel no-print" id="previewPanel" style="display:none;">
+    <h2><span class="step-num">3</span>Предпросмотр данных</h2>
+    <div class="tabs" id="fileTabs"></div>
+    <div id="previewArea"></div>
+  </div>
+
+  <div class="panel no-print">
+    <h2><span class="step-num">4</span>Проверка</h2>
+    <div class="runbar">
+      <button class="primary" id="runBtn" disabled>Запустить проверку</button>
+      <div class="stage" id="stage" style="display:none;"><div class="spinner"></div><span id="stageText"></span></div>
+    </div>
+    <div id="errorBox"></div>
+  </div>
+
+  <div class="panel" id="results">
+    <h2 class="no-print"><span class="step-num">5</span>Результаты проверки</h2>
+    <div class="summary-row" id="summaryRow"></div>
+    <div class="conclusion" id="conclusionBox"></div>
+    <div id="findingsArea"></div>
+    <div class="export-bar no-print">
+      <button class="secondary" id="exportPdf">🖨 Печать / PDF</button>
+      <button class="secondary" id="exportWord">⬇ Скачать Word (.doc)</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const SECTIONS = ["Баланс", "ОПУ", "Учётная политика", "Кросс-чеки раскрытий", "Общие замечания"];
+const SEV_LABEL = {critical:"критично", warning:"внимание", info:"наблюдение"};
+const MAX_TEXT_CHARS = 150000;
+const MAX_PDF_PAGES = 200;
+const MAX_OCR_PAGES = 30;
+
+let uploadedFiles = []; // {id, name, type, sheets:[{name, aoa, csv}], sheetActive, text, pdfPages:[{page,text,ocr}], warning, extractedText}
+let activeTabId = null;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------- Upload UI ----------
+const dropzone = $("dropzone");
+const fileInput = $("fileInput");
+dropzone.addEventListener("click", () => fileInput.click());
+["dragenter","dragover"].forEach(ev => dropzone.addEventListener(ev, e => {
+  e.preventDefault(); dropzone.classList.add("drag");
+}));
+["dragleave","drop"].forEach(ev => dropzone.addEventListener(ev, e => {
+  e.preventDefault(); dropzone.classList.remove("drag");
+}));
+dropzone.addEventListener("drop", e => handleFiles(e.dataTransfer.files));
+fileInput.addEventListener("change", e => handleFiles(e.target.files));
+
+$("toggleManual").addEventListener("click", () => {
+  const block = $("manualBlock");
+  block.style.display = block.style.display === "none" ? "block" : "none";
+  updateTextLen();
+});
+$("manualText").addEventListener("input", updateTextLen);
+
+const apiKeyInput = $("apiKey");
+apiKeyInput.value = localStorage.getItem("fsr_api_key") || "";
+apiKeyInput.addEventListener("change", () => {
+  localStorage.setItem("fsr_api_key", apiKeyInput.value.trim());
+  updateRunButton();
+});
+
+async function handleFiles(fileListRaw) {
+  const files = Array.from(fileListRaw);
+  for (const f of files) {
+    const id = "f" + Date.now() + Math.random().toString(36).slice(2,7);
+    const entry = { id, name: f.name, size: f.size, status: "processing", warning: null, extractedText: "" };
+    uploadedFiles.push(entry);
+    if (!activeTabId) activeTabId = id;
+    renderFileList();
+    renderPreviewPanel();
+    try {
+      await processFile(f, entry);
+      entry.status = "done";
+    } catch (err) {
+      entry.status = "error";
+      entry.warning = err.message || String(err);
+    }
+    renderFileList();
+    renderPreviewPanel();
+    updateTextLen();
+    updateRunButton();
+  }
+}
+
+function removeFile(id) {
+  uploadedFiles = uploadedFiles.filter(f => f.id !== id);
+  if (activeTabId === id) activeTabId = uploadedFiles.length ? uploadedFiles[0].id : null;
+  renderFileList();
+  renderPreviewPanel();
+  updateTextLen();
+  updateRunButton();
+}
+
+function renderFileList() {
+  const box = $("fileList");
+  box.innerHTML = "";
+  uploadedFiles.forEach(f => {
+    const div = document.createElement("div");
+    div.className = "fileitem";
+    const statusText = f.status === "processing" ? "обработка…" : f.status === "error" ? ("ошибка: " + f.warning) : "готово";
+    div.innerHTML = `<span><span class="fname">${escapeHtml(f.name)}</span><span class="fmeta">${statusText}</span></span>`;
+    const btn = document.createElement("button");
+    btn.textContent = "убрать";
+    btn.onclick = () => removeFile(f.id);
+    div.appendChild(btn);
+    box.appendChild(div);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ---------- File processing ----------
+async function processFile(file, entry) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
+    await processSpreadsheet(file, entry);
+  } else if (name.endsWith(".docx")) {
+    await processDocx(file, entry);
+  } else if (name.endsWith(".pdf")) {
+    await processPdf(file, entry);
+  } else {
+    throw new Error("неподдерживаемый формат");
+  }
+}
+
+async function processSpreadsheet(file, entry) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  entry.type = "sheet";
+  entry.sheets = wb.SheetNames.map(sn => {
+    const ws = wb.Sheets[sn];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+    const csv = XLSX.utils.sheet_to_csv(ws);
+    return { name: sn, aoa, csv };
+  });
+  entry.sheetActive = 0;
+  entry.extractedText = entry.sheets.map(s => `=== Лист: ${s.name} ===\n${s.csv}`).join("\n\n");
+}
+
+async function processDocx(file, entry) {
+  const buf = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer: buf });
+  entry.type = "text";
+  entry.text = result.value;
+  entry.extractedText = result.value;
+}
+
+async function processPdf(file, entry) {
+  entry.type = "pdf";
+  entry.pdfPages = [];
+  entry.progress = { page: 0, total: 0, ocrDone: 0 };
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const totalPages = Math.min(pdf.numPages, MAX_PDF_PAGES);
+  entry.progress.total = totalPages;
+  if (pdf.numPages > MAX_PDF_PAGES) {
+    entry.warning = `обработаны первые ${MAX_PDF_PAGES} из ${pdf.numPages} страниц (превышен лимит)`;
+  }
+  let ocrCount = 0;
+  let ocrLimitHit = false;
+  for (let i = 1; i <= totalPages; i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    let text = tc.items.map(it => it.str).join(" ").trim();
+    let isOcr = false;
+    if (text.length < 20) {
+      if (ocrCount < MAX_OCR_PAGES) {
+        entry.progress.ocrStage = true;
+        renderFileList();
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext("2d");
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        try {
+          const { data } = await Tesseract.recognize(canvas, "rus+eng");
+          text = (data.text || "").trim();
+          isOcr = true;
+          ocrCount++;
+          entry.progress.ocrDone = ocrCount;
+        } catch (e) {
+          text = "";
+        } finally {
+          entry.progress.ocrStage = false;
+        }
+      } else {
+        ocrLimitHit = true;
+      }
+    }
+    entry.pdfPages.push({ page: i, text, ocr: isOcr });
+    entry.progress.page = i;
+    renderFileList();
+    if (activeTabId === entry.id) renderPreviewPanel();
+  }
+  if (ocrLimitHit) {
+    entry.warning = (entry.warning ? entry.warning + "; " : "") + `лимит OCR (${MAX_OCR_PAGES} стр.) исчерпан, часть сканов не распознана`;
+  }
+  entry.extractedText = entry.pdfPages.map(p => `=== Стр. ${p.page}${p.ocr ? " (OCR)" : ""} ===\n${p.text}`).join("\n\n");
+}
+
+// ---------- Preview ----------
+function renderPreviewPanel() {
+  const panel = $("previewPanel");
+  const manualActive = $("manualBlock").style.display !== "none" && $("manualText").value.trim().length > 0;
+  if (!uploadedFiles.length) {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "block";
+  if (!activeTabId || !uploadedFiles.find(f => f.id === activeTabId)) {
+    activeTabId = uploadedFiles[0].id;
+  }
+  const tabs = $("fileTabs");
+  tabs.innerHTML = "";
+  uploadedFiles.forEach(f => {
+    const t = document.createElement("div");
+    t.className = "tab" + (f.id === activeTabId ? " active" : "");
+    t.textContent = f.name;
+    t.onclick = () => { activeTabId = f.id; renderPreviewPanel(); };
+    tabs.appendChild(t);
+  });
+
+  const area = $("previewArea");
+  area.innerHTML = "";
+  const entry = uploadedFiles.find(f => f.id === activeTabId);
+  if (!entry) return;
+
+  if (entry.warning) {
+    const w = document.createElement("div");
+    w.className = "error-box";
+    w.style.color = "#b45309"; w.style.background = "#fffbeb"; w.style.borderColor = "#fde68a";
+    w.textContent = "Предупреждение: " + entry.warning;
+    area.appendChild(w);
+  }
+
+  if (entry.status === "processing") {
+    if (entry.type === "pdf" && entry.progress) {
+      const wrap = document.createElement("div");
+      const pct = entry.progress.total ? Math.round((entry.progress.page / entry.progress.total) * 100) : 0;
+      wrap.innerHTML = `<div class="progress-label">Обработка страниц: ${entry.progress.page} из ${entry.progress.total}${entry.progress.ocrStage ? " — выполняется OCR текущей страницы…" : ""}</div>
+        <div class="progressbar"><div style="width:${pct}%"></div></div>
+        <div class="progress-label">OCR распознано страниц: ${entry.progress.ocrDone || 0} из ${MAX_OCR_PAGES}</div>`;
+      area.appendChild(wrap);
+    } else {
+      area.innerHTML += `<div class="progress-label">Обработка файла…</div>`;
+    }
+    return;
+  }
+
+  if (entry.type === "sheet") {
+    const sheetTabs = document.createElement("div");
+    sheetTabs.className = "tabs";
+    entry.sheets.forEach((s, idx) => {
+      const t = document.createElement("div");
+      t.className = "tab" + (idx === entry.sheetActive ? " active" : "");
+      t.textContent = s.name;
+      t.onclick = () => { entry.sheetActive = idx; renderPreviewPanel(); };
+      sheetTabs.appendChild(t);
+    });
+    area.appendChild(sheetTabs);
+    const sheet = entry.sheets[entry.sheetActive];
+    const tableWrap = document.createElement("div");
+    tableWrap.className = "preview-table";
+    const table = document.createElement("table");
+    sheet.aoa.slice(0, 200).forEach(row => {
+      const tr = document.createElement("tr");
+      (row || []).forEach(cell => {
+        const td = document.createElement("td");
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    tableWrap.appendChild(table);
+    area.appendChild(tableWrap);
+  } else if (entry.type === "text") {
+    const pre = document.createElement("div");
+    pre.className = "preview-text";
+    pre.textContent = entry.text;
+    area.appendChild(pre);
+  } else if (entry.type === "pdf") {
+    const pre = document.createElement("div");
+    pre.className = "preview-text";
+    pre.textContent = entry.extractedText;
+    area.appendChild(pre);
+  }
+}
+
+// ---------- Text length / run button ----------
+function gatherText() {
+  let parts = uploadedFiles.filter(f => f.status === "done" && f.extractedText).map(f => `##### Файл: ${f.name} #####\n${f.extractedText}`);
+  const manual = $("manualText").value.trim();
+  if (manual) parts.push(`##### Вставленный текст #####\n${manual}`);
+  return parts.join("\n\n");
+}
+
+function updateTextLen() {
+  const text = gatherText();
+  const lenBox = $("textLen");
+  if (!text) { lenBox.textContent = ""; updateRunButton(); return; }
+  const over = text.length > MAX_TEXT_CHARS;
+  lenBox.className = "textlen" + (over ? " over" : "");
+  lenBox.textContent = `Объём текста для анализа: ${text.length.toLocaleString("ru-RU")} симв.` +
+    (over ? ` — превышен лимит ${MAX_TEXT_CHARS.toLocaleString("ru-RU")}, будет передана только часть документа.` : "");
+  updateRunButton();
+}
+
+function updateRunButton() {
+  const hasKey = apiKeyInput.value.trim().length > 0;
+  const hasText = gatherText().length > 0;
+  const anyProcessing = uploadedFiles.some(f => f.status === "processing");
+  $("runBtn").disabled = !(hasKey && hasText) || anyProcessing;
+}
+
+// ---------- Run review ----------
+const SYSTEM_PROMPT = `Ты — опытный МСФО-специалист по контролю качества отчётности, выполняющий предварительную проверку пакета финансовой отчётности перед сдачей. Тебе передан извлечённый текст отчётности (возможно из нескольких файлов: баланс, отчёт о прибылях и убытках, примечания и т.д.).
+
+Проверь данные строго по следующим разделам:
+1. Баланс — арифметика и промежуточные/итоговые суммы (footing); равенство Активы = Обязательства + Капитал; корректность классификации текущих/долгосрочных статей (IAS 1); логичность динамики статьи период к периоду.
+2. ОПУ (отчёт о прибылях и убытках) — арифметика и промежуточные итоги; корректность классификации расходов по функции или характеру (IAS 1); необычные или немотивированные отклонения.
+3. Учётная политика — соответствие фактически применяемых методов (признание выручки, амортизация, оценка запасов, резервы и т.д.) заявленной политике, последовательность применения.
+4. Кросс-чеки раскрытий — совпадение сумм из примечаний со строками баланса и ОПУ; совпадение одних и тех же показателей между разными примечаниями; увязка чистой прибыли с изменением нераспределённой прибыли в капитале; увязка остатка денежных средств (ДДС) с балансом.
+5. Общие замечания — прочие логические противоречия и аномалии, не относящиеся к разделам выше.
+
+Правила:
+- Не придумывай цифры. Если данных для проверки раздела недостаточно — раздел пропускается, не включай по нему замечания.
+- Каждое замечание получает severity: critical (ошибка/расхождение), warning (потенциальное несоответствие) или info (наблюдение, включая подтверждение того, что раздел проверен и сходится).
+- Не более 14 замечаний суммарно. Внутри каждого раздела сортируй по критичности: critical, затем warning, затем info.
+- Стиль — деловой, без разговорных оборотов, конкретные формулировки с цифрами там, где есть расхождение.
+- Если применим конкретный стандарт МСФО (IFRS/IAS), укажи ссылку на него в standard_ref.
+- Передай результат ТОЛЬКО вызовом инструмента submit_review, без сопроводительного текста.`;
+
+const TOOL_DEF = {
+  name: "submit_review",
+  description: "Передать структурированный результат проверки финансовой отчётности",
+  input_schema: {
+    type: "object",
+    properties: {
+      summary: {
+        type: "object",
+        properties: {
+          critical: { type: "integer" },
+          warning: { type: "integer" },
+          info: { type: "integer" }
+        },
+        required: ["critical", "warning", "info"]
+      },
+      conclusion: { type: "string", description: "Общее заключение, 1-2 предложения" },
+      findings: {
+        type: "array",
+        maxItems: 14,
+        items: {
+          type: "object",
+          properties: {
+            section: { type: "string", enum: SECTIONS },
+            severity: { type: "string", enum: ["critical", "warning", "info"] },
+            item: { type: "string", description: "Статья отчётности" },
+            description: { type: "string" },
+            standard_ref: { type: "string" }
+          },
+          required: ["section", "severity", "item", "description"]
+        }
+      }
+    },
+    required: ["summary", "conclusion", "findings"]
+  }
+};
+
+const STAGE_MESSAGES = [
+  "Сверяем итоги баланса…",
+  "Проверяем равенство Активы = Обязательства + Капитал…",
+  "Проверяем классификацию статей по IAS 1…",
+  "Сверяем итоги ОПУ…",
+  "Сверяем учётную политику…",
+  "Проверяем увязки между формами и примечаниями…",
+  "Формируем итоговое заключение…"
+];
+
+let stageInterval = null;
+
+$("runBtn").addEventListener("click", runReview);
+
+async function runReview() {
+  const apiKey = apiKeyInput.value.trim();
+  const text = gatherText().slice(0, MAX_TEXT_CHARS);
+  $("errorBox").innerHTML = "";
+  $("results").style.display = "none";
+  $("runBtn").disabled = true;
+  $("stage").style.display = "flex";
+  let stageIdx = 0;
+  $("stageText").textContent = STAGE_MESSAGES[0];
+  stageInterval = setInterval(() => {
+    stageIdx = (stageIdx + 1) % STAGE_MESSAGES.length;
+    $("stageText").textContent = STAGE_MESSAGES[stageIdx];
+  }, 2200);
+
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 8000,
+        system: SYSTEM_PROMPT,
+        tools: [TOOL_DEF],
+        tool_choice: { type: "tool", name: "submit_review" },
+        messages: [{ role: "user", content: text }]
+      })
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || `Ошибка API (${resp.status})`);
+    }
+    const data = await resp.json();
+    const toolUse = (data.content || []).find(c => c.type === "tool_use" && c.name === "submit_review");
+    if (!toolUse) throw new Error("Модель не вернула структурированный результат. Попробуйте ещё раз.");
+    renderResults(toolUse.input);
+  } catch (err) {
+    $("errorBox").innerHTML = `<div class="error-box">Не удалось выполнить проверку: ${escapeHtml(err.message || String(err))}. Введённые данные сохранены — можно повторить попытку.</div>`;
+  } finally {
+    clearInterval(stageInterval);
+    $("stage").style.display = "none";
+    updateRunButton();
+  }
+}
+
+function renderResults(result) {
+  const s = result.summary || { critical: 0, warning: 0, info: 0 };
+  $("summaryRow").innerHTML = `
+    <div class="summary-card critical"><div class="num">${s.critical ?? 0}</div><div class="lbl">критично</div></div>
+    <div class="summary-card warning"><div class="num">${s.warning ?? 0}</div><div class="lbl">внимание</div></div>
+    <div class="summary-card info"><div class="num">${s.info ?? 0}</div><div class="lbl">наблюдение</div></div>
+  `;
+  $("conclusionBox").textContent = result.conclusion || "";
+
+  const bySection = {};
+  SECTIONS.forEach(s => bySection[s] = []);
+  (result.findings || []).forEach(f => {
+    if (!bySection[f.section]) bySection[f.section] = [];
+    bySection[f.section].push(f);
+  });
+  const sevOrder = { critical: 0, warning: 1, info: 2 };
+  const findingsArea = $("findingsArea");
+  findingsArea.innerHTML = "";
+  SECTIONS.forEach(section => {
+    const items = (bySection[section] || []).slice().sort((a, b) => sevOrder[a.severity] - sevOrder[b.severity]);
+    if (!items.length) return;
+    const block = document.createElement("div");
+    block.className = "section-block";
+    const h3 = document.createElement("h3");
+    h3.textContent = section;
+    block.appendChild(h3);
+    items.forEach(f => {
+      const div = document.createElement("div");
+      div.className = "finding " + f.severity;
+      div.innerHTML = `
+        <div class="fhead"><span>${escapeHtml(f.item || "")}</span><span class="fsev">${SEV_LABEL[f.severity] || f.severity}</span></div>
+        <div>${escapeHtml(f.description || "")}</div>
+        ${f.standard_ref ? `<div class="fstd">Стандарт: ${escapeHtml(f.standard_ref)}</div>` : ""}
+      `;
+      block.appendChild(div);
+    });
+    findingsArea.appendChild(block);
+  });
+
+  $("results").style.display = "block";
+  $("results").scrollIntoView({ behavior: "smooth" });
+}
+
+// ---------- Export ----------
+$("exportPdf").addEventListener("click", () => window.print());
+
+$("exportWord").addEventListener("click", () => {
+  const resultsHtml = $("results").innerHTML.replace(/<button[\s\S]*?<\/button>/g, "").replace(/<div class="export-bar[\s\S]*?<\/div>/g, "");
+  const doc = `
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head><meta charset="utf-8"><title>Результаты проверки отчётности</title>
+    <style>
+      body{font-family:Arial,sans-serif; font-size:12pt; color:#1f2937;}
+      h2,h3{color:#2F5E15;}
+      .summary-card{display:inline-block; width:120px; text-align:center; padding:10px; margin-right:10px; border-radius:6px;}
+      .summary-card.critical{background:#fef2f2; color:#b91c1c; border:1px solid #fecaca;}
+      .summary-card.warning{background:#fffbeb; color:#b45309; border:1px solid #fde68a;}
+      .summary-card.info{background:#eef7e3; color:#3c7a1e; border:1px solid #cfe9ac;}
+      .finding{border-radius:6px; padding:8px 10px; margin-bottom:6px; border:1px solid;}
+      .finding.critical{background:#fef2f2; border-color:#fecaca;}
+      .finding.warning{background:#fffbeb; border-color:#fde68a;}
+      .finding.info{background:#eef7e3; border-color:#cfe9ac;}
+      .fhead{font-weight:bold;}
+      .conclusion{border:1px solid #dfe3e8; padding:10px; border-radius:6px; margin:10px 0;}
+    </style></head>
+    <body><h2>Результаты проверки финансовой отчётности</h2>${resultsHtml}</body></html>`;
+  const blob = new Blob(['﻿', doc], { type: "application/msword" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "review-report.doc";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+updateRunButton();
+</script>
+</body>
+</html>

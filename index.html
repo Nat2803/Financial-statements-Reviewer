@@ -805,10 +805,14 @@ let stageInterval = null;
 $("runBtn").addEventListener("click", runReview);
 
 async function runReview() {
-  const apiKey = apiKeyInput.value.trim();
+  const apiKey = apiKeyInput.value.trim().replace(/[^\x21-\x7E]/g, "");
   const text = gatherText().slice(0, MAX_TEXT_CHARS);
   $("errorBox").innerHTML = "";
   $("results").style.display = "none";
+  if (!apiKey) {
+    $("errorBox").innerHTML = `<div class="error-box">API-ключ пустой или содержит только недопустимые символы. Скопируйте ключ заново с console.anthropic.com и вставьте без изменений.</div>`;
+    return;
+  }
   $("runBtn").disabled = true;
   $("stage").style.display = "flex";
   let stageIdx = 0;

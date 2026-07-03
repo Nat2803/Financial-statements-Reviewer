@@ -159,6 +159,12 @@
   button.secondary:hover{background:var(--accent-soft); border-color:var(--accent);}
 
   .runbar{display:flex; align-items:center; gap:16px; flex-wrap:wrap;}
+  .stage{font-size:13px; color:var(--accent-dark); font-weight:700; display:flex; align-items:center; gap:9px;}
+  .spinner{
+    width:15px; height:15px; border:2.5px solid #dfe8d3; border-top-color:var(--accent);
+    border-radius:50%; animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
   @keyframes fadein{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
 
   .error-box{
@@ -233,12 +239,19 @@
     <div class="disclaimer">
       <span class="ico">ⓘ</span>
       <span>Инструмент не заменяет заключение аттестованного аудитора и не является профессиональной аудиторской или бухгалтерской консультацией.
-      Все файлы разбираются и проверяются полностью локально в вашем браузере — ничего не отправляется на внешние серверы.</span>
+      Разбор файлов выполняется локально в браузере; во внешний API передаётся только извлечённый текстовый слой отчётности.</span>
     </div>
   </div>
 
   <div class="panel no-print">
-    <h2><span class="step-num">1</span>Загрузка пакета отчётности</h2>
+    <h2><span class="step-num">1</span>Ключ доступа к Anthropic API</h2>
+    <label for="apiKey">API-ключ (sk-ant-...)</label>
+    <input type="password" id="apiKey" placeholder="sk-ant-...">
+    <div class="hint">Ключ хранится только в вашем браузере (localStorage) и используется для прямых запросов к Claude.</div>
+  </div>
+
+  <div class="panel no-print">
+    <h2><span class="step-num">2</span>Загрузка пакета отчётности</h2>
     <div class="dropzone" id="dropzone">
       <span class="upicon">⬆</span>
       Перетащите файлы сюда или <strong>выберите файлы</strong>
@@ -255,22 +268,24 @@
   </div>
 
   <div class="panel no-print" id="previewPanel" style="display:none;">
-    <h2><span class="step-num">2</span>Предпросмотр данных</h2>
+    <h2><span class="step-num">3</span>Предпросмотр данных</h2>
     <div class="tabs" id="fileTabs"></div>
     <div id="previewArea"></div>
   </div>
 
   <div class="panel no-print">
-    <h2><span class="step-num">3</span>Проверка</h2>
+    <h2><span class="step-num">4</span>Проверка</h2>
     <div class="runbar">
-      <button class="primary" id="localCheckBtn" disabled>Запустить проверку</button>
+      <button class="primary" id="localCheckBtn" disabled>Проверить арифметику бесплатно (без ИИ)</button>
+      <button class="secondary" id="runBtn" disabled>Проверить с помощью ИИ (нужен API-ключ)</button>
+      <div class="stage" id="stage" style="display:none;"><div class="spinner"></div><span id="stageText"></span></div>
     </div>
-    <div class="hint">Проверка сверяет промежуточные и итоговые суммы (footing) и равенство Активы = Обязательства + Капитал в загруженных таблицах (.xlsx/.xls/.csv).</div>
+    <div class="hint">Бесплатная проверка сверяет итоги и промежуточные суммы в загруженных таблицах (.xlsx/.xls/.csv) — без обращения к Claude. Классификацию по МСФО, учётную политику и увязки между примечаниями проверяет только режим с ИИ.</div>
     <div id="errorBox"></div>
   </div>
 
   <div class="panel" id="results">
-    <h2 class="no-print"><span class="step-num">4</span>Результаты проверки</h2>
+    <h2 class="no-print"><span class="step-num">5</span>Результаты проверки</h2>
     <div class="summary-row" id="summaryRow"></div>
     <div class="conclusion" id="conclusionBox"></div>
     <div id="findingsArea"></div>
@@ -287,6 +302,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs
 
 const SECTIONS = ["Баланс", "ОПУ", "Учётная политика", "Кросс-чеки раскрытий", "Общие замечания"];
 const SEV_LABEL = {critical:"критично", warning:"внимание", info:"наблюдение"};
+const MAX_TEXT_CHARS = 800000;
 const MAX_PDF_PAGES = 200;
 const MAX_OCR_PAGES = 30;
 
@@ -314,6 +330,13 @@ $("toggleManual").addEventListener("click", () => {
   updateTextLen();
 });
 $("manualText").addEventListener("input", updateTextLen);
+
+const apiKeyInput = $("apiKey");
+apiKeyInput.value = localStorage.getItem("fsr_api_key") || "";
+apiKeyInput.addEventListener("change", () => {
+  localStorage.setItem("fsr_api_key", apiKeyInput.value.trim());
+  updateRunButton();
+});
 
 async function handleFiles(fileListRaw) {
   const files = Array.from(fileListRaw);
@@ -556,13 +579,19 @@ function gatherText() {
 function updateTextLen() {
   const text = gatherText();
   const lenBox = $("textLen");
-  lenBox.textContent = text ? `Объём загруженных данных: ${text.length.toLocaleString("ru-RU")} симв.` : "";
+  if (!text) { lenBox.textContent = ""; updateRunButton(); return; }
+  const over = text.length > MAX_TEXT_CHARS;
+  lenBox.className = "textlen" + (over ? " over" : "");
+  lenBox.textContent = `Объём текста для анализа: ${text.length.toLocaleString("ru-RU")} симв.` +
+    (over ? ` — превышен лимит ${MAX_TEXT_CHARS.toLocaleString("ru-RU")}, будет передана только часть документа.` : "");
   updateRunButton();
 }
 
 function updateRunButton() {
+  const hasKey = apiKeyInput.value.trim().length > 0;
   const hasText = gatherText().length > 0;
   const anyProcessing = uploadedFiles.some(f => f.status === "processing");
+  $("runBtn").disabled = !(hasKey && hasText) || anyProcessing;
   $("localCheckBtn").disabled = !hasText || anyProcessing;
 }
 
@@ -707,6 +736,123 @@ function runLocalCheck() {
   });
 }
 
+// ---------- Run review (AI, requires Anthropic API key) ----------
+const SYSTEM_PROMPT = `Ты — опытный МСФО-специалист по контролю качества отчётности, выполняющий предварительную проверку пакета финансовой отчётности перед сдачей. Тебе передан извлечённый текст отчётности (возможно из нескольких файлов: баланс, отчёт о прибылях и убытках, примечания и т.д.).
+
+Проверь данные строго по следующим разделам:
+1. Баланс — арифметика и промежуточные/итоговые суммы (footing); равенство Активы = Обязательства + Капитал; корректность классификации текущих/долгосрочных статей (IAS 1); логичность динамики статьи период к периоду.
+2. ОПУ (отчёт о прибылях и убытках) — арифметика и промежуточные итоги; корректность классификации расходов по функции или характеру (IAS 1); необычные или немотивированные отклонения.
+3. Учётная политика — соответствие фактически применяемых методов (признание выручки, амортизация, оценка запасов, резервы и т.д.) заявленной политике, последовательность применения.
+4. Кросс-чеки раскрытий — совпадение сумм из примечаний со строками баланса и ОПУ; совпадение одних и тех же показателей между разными примечаниями; увязка чистой прибыли с изменением нераспределённой прибыли в капитале; увязка остатка денежных средств (ДДС) с балансом.
+5. Общие замечания — прочие логические противоречия и аномалии, не относящиеся к разделам выше.
+
+Правила:
+- Не придумывай цифры. Если данных для проверки раздела недостаточно — раздел пропускается, не включай по нему замечания.
+- Каждое замечание получает severity: critical (ошибка/расхождение), warning (потенциальное несоответствие) или info (наблюдение, включая подтверждение того, что раздел проверен и сходится).
+- Не более 14 замечаний суммарно. Внутри каждого раздела сортируй по критичности: critical, затем warning, затем info.
+- Стиль — деловой, без разговорных оборотов, конкретные формулировки с цифрами там, где есть расхождение.
+- Если применим конкретный стандарт МСФО (IFRS/IAS), укажи ссылку на него в standard_ref.
+- Передай результат ТОЛЬКО вызовом инструмента submit_review, без сопроводительного текста.`;
+
+const TOOL_DEF = {
+  name: "submit_review",
+  description: "Передать структурированный результат проверки финансовой отчётности",
+  input_schema: {
+    type: "object",
+    properties: {
+      summary: {
+        type: "object",
+        properties: {
+          critical: { type: "integer" },
+          warning: { type: "integer" },
+          info: { type: "integer" }
+        },
+        required: ["critical", "warning", "info"]
+      },
+      conclusion: { type: "string", description: "Общее заключение, 1-2 предложения" },
+      findings: {
+        type: "array",
+        maxItems: 14,
+        items: {
+          type: "object",
+          properties: {
+            section: { type: "string", enum: SECTIONS },
+            severity: { type: "string", enum: ["critical", "warning", "info"] },
+            item: { type: "string", description: "Статья отчётности" },
+            description: { type: "string" },
+            standard_ref: { type: "string" }
+          },
+          required: ["section", "severity", "item", "description"]
+        }
+      }
+    },
+    required: ["summary", "conclusion", "findings"]
+  }
+};
+
+const STAGE_MESSAGES = [
+  "Сверяем итоги баланса…",
+  "Проверяем равенство Активы = Обязательства + Капитал…",
+  "Проверяем классификацию статей по IAS 1…",
+  "Сверяем итоги ОПУ…",
+  "Сверяем учётную политику…",
+  "Проверяем увязки между формами и примечаниями…",
+  "Формируем итоговое заключение…"
+];
+
+let stageInterval = null;
+
+$("runBtn").addEventListener("click", runReview);
+
+async function runReview() {
+  const apiKey = apiKeyInput.value.trim();
+  const text = gatherText().slice(0, MAX_TEXT_CHARS);
+  $("errorBox").innerHTML = "";
+  $("results").style.display = "none";
+  $("runBtn").disabled = true;
+  $("stage").style.display = "flex";
+  let stageIdx = 0;
+  $("stageText").textContent = STAGE_MESSAGES[0];
+  stageInterval = setInterval(() => {
+    stageIdx = (stageIdx + 1) % STAGE_MESSAGES.length;
+    $("stageText").textContent = STAGE_MESSAGES[stageIdx];
+  }, 2200);
+
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 8000,
+        system: SYSTEM_PROMPT,
+        tools: [TOOL_DEF],
+        tool_choice: { type: "tool", name: "submit_review" },
+        messages: [{ role: "user", content: text }]
+      })
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || `Ошибка API (${resp.status})`);
+    }
+    const data = await resp.json();
+    const toolUse = (data.content || []).find(c => c.type === "tool_use" && c.name === "submit_review");
+    if (!toolUse) throw new Error("Модель не вернула структурированный результат. Попробуйте ещё раз.");
+    renderResults(toolUse.input);
+  } catch (err) {
+    $("errorBox").innerHTML = `<div class="error-box">Не удалось выполнить проверку: ${escapeHtml(err.message || String(err))}. Введённые данные сохранены — можно повторить попытку.</div>`;
+  } finally {
+    clearInterval(stageInterval);
+    $("stage").style.display = "none";
+    updateRunButton();
+  }
+}
 
 function renderResults(result) {
   const s = result.summary || { critical: 0, warning: 0, info: 0 };
